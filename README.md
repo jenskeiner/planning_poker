@@ -33,6 +33,15 @@ uv pip install -e .
 python -m planning_poker.app
 ```
 
+Or use the provided run script:
+```bash
+# Development mode
+./run.py
+
+# Production mode
+./run.py --prod
+```
+
 2. Open your browser and navigate to `http://localhost:5000`
 
 3. Create a new session by entering your nickname
@@ -45,6 +54,11 @@ For production environments, use Gunicorn with the eventlet worker:
 
 ```bash
 gunicorn --worker-class eventlet -w 1 wsgi:application
+```
+
+Or use the provided run script:
+```bash
+./run.py --prod
 ```
 
 This provides better performance and stability for production deployments.

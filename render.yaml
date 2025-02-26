@@ -3,4 +3,4 @@ services:
     name: planning-poker
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --worker-class eventlet -w 1 wsgi:application
+    startCommand: gunicorn -b 0.0.0.0:$PORT --worker-class eventlet -w 1 wsgi:application
