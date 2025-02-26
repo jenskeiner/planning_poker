@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: planning-poker
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m planning_poker.app
