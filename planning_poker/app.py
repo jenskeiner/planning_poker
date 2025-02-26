@@ -1,10 +1,14 @@
+# Ensure eventlet is properly configured for production
+import eventlet
+eventlet.monkey_patch()
+
 from flask import Flask, render_template, request, session, redirect, url_for
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import uuid
 import os
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'  # In production, use a secure secret key
-socketio = SocketIO(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Store active sessions and their participants
 sessions = {}
