@@ -39,6 +39,16 @@ python -m planning_poker.app
 
 4. Share the session URL with your team members
 
+## Running in Production
+
+For production environments, use Gunicorn with the eventlet worker:
+
+```bash
+gunicorn --worker-class eventlet -w 1 wsgi:application
+```
+
+This provides better performance and stability for production deployments.
+
 ## Running Tests
 
 ```bash
