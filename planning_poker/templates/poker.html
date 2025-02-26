@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planning Poker - Session</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <div class="flex justify-between items-center mb-6">
+                <h1 class="text-2xl font-bold">Planning Poker</h1>
+                <div class="text-sm text-gray-600">
+                    Session ID: <span class="font-mono">{{ session_id }}</span>
+                </div>
+            </div>
+
+            <div class="mb-6 bg-blue-50 p-4 rounded-lg">
+                <h2 class="text-lg font-semibold mb-2">Share Session</h2>
+                <div class="flex items-center space-x-2">
+                    <input type="text" id="session-url" readonly value="{{ url_for('poker_room', session_id=session_id, _external=True) }}"
+                           class="flex-1 p-2 border rounded bg-white">
+                    <button onclick="copySessionUrl()"
+                            class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        Copy
+                    </button>
+                </div>
+            </div>
+
+            <div class="mb-6">
+                <h2 class="text-lg font-semibold mb-2">Participants</h2>
+                <div id="participants" class="space-y-2"></div>
+                <div id="average-container" class="mt-4 p-3 bg-blue-50 rounded-lg hidden">
+                    <div class="font-semibold">Average Vote: <span id="average-vote" class="text-lg"></span></div>
+                </div>
+            </div>
+
+            {% if not is_observer %}
+            <div class="mb-6">
+                <h2 class="text-lg font-semibold mb-2">Your Vote</h2>
+                <div class="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                    {% for point in points %}
+                    <button onclick="vote('{{ point }}')"
+                            class="vote-button p-4 text-center border rounded-lg hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        {{ point }}
+                    </button>
+                    {% endfor %}
+                </div>
+                <button onclick="rescindVote()"
+                        id="rescind-button"
+                        class="mt-2 px-4 py-2 text-red-600 border border-red-600 rounded hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 hidden">
+                    Rescind Vote
+                </button>
+            </div>
+            {% endif %}
+
+            {% if is_creator %}
+            <div class="mt-4 space-x-2">
+                <button onclick="revealVotes()"
+                        id="reveal-button"
+                        disabled
+                        class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed">
+                    Reveal Votes
+                </button>
+                <button onclick="resetVoting()"
+                        class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500">
+                    Reset
+                </button>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const sessionId = '{{ session_id }}';
+        const nickname = '{{ nickname }}';
+        const isObserver = {{ 'true' if is_observer else 'false' }};
+        const isCreator = {{ 'true' if is_creator else 'false' }};
+        
+        socket.on('connect', () => {
+            socket.emit('join', { session_id: sessionId });
+        });
+
+        socket.on('session_state', (data) => {
+            console.log('session_state event received:', data);
+            updateParticipantsList(data.participants, data.votes);
+            
+            // Only update reveal button if it exists (only for creator)
+            const revealButton = document.getElementById('reveal-button');
+            if (revealButton) {
+                revealButton.disabled = !data.all_voted;
+            }
+            
+            // Handle revealed votes
+            if (data.revealed && data.votes) {
+                console.log('Showing votes from session_state:', data.votes);
+                const averageContainer = document.getElementById('average-container');
+                if (averageContainer) {
+                    averageContainer.classList.remove('hidden');
+                    const averageVote = document.getElementById('average-vote');
+                    if (averageVote) {
+                        averageVote.textContent = data.average_vote;
+                    }
+                }
+            } else {
+                const averageContainer = document.getElementById('average-container');
+                if (averageContainer) {
+                    averageContainer.classList.add('hidden');
+                }
+            }
+        });
+
+        socket.on('participants_list', (data) => {
+            updateParticipantsList(data.participants);
+            
+            // Enable reveal button only when all non-observers have voted
+            const nonObservers = data.participants.filter(p => !p.is_observer);
+            const votedNonObservers = nonObservers.filter(p => p.has_voted);
+            document.getElementById('reveal-button').disabled = 
+                nonObservers.length === 0 || votedNonObservers.length !== nonObservers.length;
+        });
+
+        socket.on('user_joined', (data) => {
+            console.log(`${data.nickname} joined the session`);
+        });
+
+        socket.on('user_left', (data) => {
+            console.log(`${data.nickname} left the session`);
+        });
+
+        socket.on('user_voted', (data) => {
+            const participantEl = document.querySelector(`[data-nickname="${data.nickname}"]`);
+            if (participantEl) {
+                participantEl.querySelector('.vote-status').textContent = 'Voted';
+                participantEl.classList.add('has-voted');
+            }
+            
+            // If this is the current user, highlight their vote and show rescind button
+            if (data.nickname === nickname && data.vote) {
+                document.querySelectorAll('.vote-button').forEach(button => {
+                    button.classList.remove('bg-blue-100');
+                    if (button.innerText.trim() === data.vote) {
+                        button.classList.add('bg-blue-100');
+                    }
+                });
+                
+                const rescindButton = document.getElementById('rescind-button');
+                if (rescindButton) {
+                    rescindButton.classList.remove('hidden');
+                }
+            }
+        });
+
+        socket.on('vote_rescinded', (data) => {
+            const participantEl = document.querySelector(`[data-nickname="${data.nickname}"]`);
+            if (participantEl) {
+                participantEl.querySelector('.vote-status').textContent = 'Not voted';
+                participantEl.classList.remove('has-voted');
+            }
+            
+            // If this is the current user, remove vote highlighting and hide rescind button
+            if (data.nickname === nickname) {
+                document.querySelectorAll('.vote-button').forEach(button => {
+                    button.classList.remove('bg-blue-100');
+                });
+                
+                const rescindButton = document.getElementById('rescind-button');
+                if (rescindButton) {
+                    rescindButton.classList.add('hidden');
+                }
+            }
+        });
+
+        socket.on('votes_revealed', (data) => {
+            console.log('votes_revealed event received:', data);
+            updateParticipantsList(data.participants, data.votes);
+            
+            // Show average vote
+            const averageContainer = document.getElementById('average-container');
+            if (averageContainer) {
+                averageContainer.classList.remove('hidden');
+                const averageVote = document.getElementById('average-vote');
+                if (averageVote) {
+                    averageVote.textContent = data.average_vote;
+                }
+            }
+        });
+
+        socket.on('voting_reset', () => {
+            document.querySelectorAll('.has-voted').forEach(el => {
+                el.classList.remove('has-voted');
+                el.querySelector('.vote-status').textContent = 'Not voted';
+            });
+            
+            document.querySelectorAll('.vote-button').forEach(button => {
+                button.classList.remove('bg-blue-100');
+            });
+            
+            const rescindButton = document.getElementById('rescind-button');
+            if (rescindButton) {
+                rescindButton.classList.add('hidden');
+            }
+            
+            const revealButton = document.getElementById('reveal-button');
+            if (revealButton) {
+                revealButton.disabled = true;
+            }
+            
+            const averageContainer = document.getElementById('average-container');
+            if (averageContainer) {
+                averageContainer.classList.add('hidden');
+            }
+        });
+
+        function updateParticipantsList(participants, votes = null) {
+            const participantsDiv = document.getElementById('participants');
+            participantsDiv.innerHTML = '';
+            
+            participants.forEach(participant => {
+                const participantEl = document.createElement('div');
+                participantEl.className = 'p-2 bg-gray-50 rounded flex justify-between' + 
+                                       (participant.has_voted ? ' has-voted' : '');
+                participantEl.setAttribute('data-nickname', participant.nickname);
+                
+                let voteText = participant.has_voted ? 'Voted' : 'Not voted';
+                
+                // If votes are revealed, show the actual vote
+                if (votes && votes[participant.nickname]) {
+                    voteText = votes[participant.nickname];
+                }
+                
+                participantEl.innerHTML = `
+                    <span>${participant.nickname}${participant.is_observer ? ' (Observer)' : ''}</span>
+                    <span class="vote-status text-gray-500">${voteText}</span>
+                `;
+                participantsDiv.appendChild(participantEl);
+            });
+        }
+
+        function vote(value) {
+            if (isObserver) return;
+            
+            socket.emit('vote', {
+                session_id: sessionId,
+                vote: value
+            });
+        }
+
+        function rescindVote() {
+            if (isObserver) return;
+            
+            socket.emit('rescind_vote', {
+                session_id: sessionId
+            });
+        }
+
+        function revealVotes() {
+            socket.emit('reveal_votes', { session_id: sessionId });
+        }
+
+        function resetVoting() {
+            socket.emit('reset_voting', { session_id: sessionId });
+        }
+
+        function copySessionUrl() {
+            const urlInput = document.getElementById('session-url');
+            urlInput.select();
+            document.execCommand('copy');
+            
+            // Visual feedback
+            const button = event.target;
+            const originalText = button.textContent;
+            button.textContent = 'Copied!';
+            setTimeout(() => {
+                button.textContent = originalText;
+            }, 2000);
+        }
+
+        // Initial participants list update
+        updateParticipantsList([{ nickname: nickname, is_observer: isObserver, has_voted: false }]);
+    </script>
+</body>
+</html>
